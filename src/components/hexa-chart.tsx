@@ -1,14 +1,19 @@
 "use client";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { CandlestickSeries, ColorType, createChart, IChartApi, ISeriesApi, LineSeries, UTCTimestamp } from "lightweight-charts";
 import { INTERVALS, Interval, sma } from "@/lib/market";
 import { useMarketStream } from "@/hooks/use-market-stream";
 import {WorkspacePanel, ChartState} from "./workspace-panel";
+import {ScriptEditor} from "./script-editor";
+import {parseHexaScript,evaluateHexaScript} from "@/lib/hexascript";
 export function HexaChart() {
-  const [state,setState]=useState<ChartState>({schemaVersion:1,symbol:"BTCUSDT",interval:"1m",showSma:false});
-  return <><WorkspacePanel state={state} onLoad={setState}/><ChartSession key={state.interval} interval={state.interval} changeInterval={interval=>setState(s=>({...s,interval}))} showSma={state.showSma} toggleSma={()=>setState(s=>({...s,showSma:!s.showSma}))}/></>;
+  const [state,setState]=useState<ChartState>({schemaVersion:1,symbol:"BTCUSDT",interval:"1m",showSma:false,script:""});
+  return <><WorkspacePanel state={state} onLoad={setState}/><ChartSession key={state.interval} interval={state.interval} changeInterval={interval=>setState(s=>({...s,interval}))} script={state.script??""} showSma={state.showSma} toggleSma={()=>setState(s=>({...s,showSma:!s.showSma}))}/><ScriptEditor key={state.script??""} source={state.script??""} onApply={script=>setState(s=>({...s,script}))} onRemove={()=>setState(s=>({...s,script:""}))}/></>;
 }
-function ChartSession({interval, changeInterval, showSma, toggleSma}: {interval: Interval; changeInterval: (value: Interval) => void; showSma:boolean; toggleSma:()=>void}) {
+function ChartSession({interval, changeInterval, showSma, toggleSma, script}: {interval: Interval; changeInterval: (value: Interval) => void; showSma:boolean; toggleSma:()=>void;script:string}) {
+  const program=useMemo(()=>{try{return script?parseHexaScript(script):null;}catch{return null;}},[script]);
+  const scriptSeries=useRef<ISeriesApi<"Line">[]>([]);
+  const scriptColors=["#38bdf8","#fbbf24","#f472b6","#a3e635"];
   const container = useRef<HTMLDivElement>(null);
   const chart = useRef<IChartApi | null>(null);
   const price = useRef<ISeriesApi<"Candlestick"> | null>(null);
@@ -49,6 +54,17 @@ function ChartSession({interval, changeInterval, showSma, toggleSma}: {interval:
     rendered.current = {revision, first: candles[0].time};
   }, [candles, revision]);
   useEffect(() => { average.current?.applyOptions({visible: showSma}); }, [showSma]);
+  useEffect(()=>{
+    const api=chart.current;if(!api)return;
+    const lines=program?.body.map((node,i)=>api.addSeries(LineSeries,{color:scriptColors[i],lineWidth:2,priceLineVisible:false,lastValueVisible:false,title:`${node.kind} ${node.period}`}))??[];
+    scriptSeries.current=lines;
+    return ()=>{scriptSeries.current=[];if(chart.current===api)for(const line of lines)api.removeSeries(line);};
+  },[program]);
+  useEffect(()=>{
+    if(!program)return;
+    const plots=evaluateHexaScript(program,candles);
+    plots.forEach((plot,i)=>scriptSeries.current[i]?.setData(plot.points.map(point=>({...point,time:point.time as UTCTimestamp}))));
+  },[program,candles]);
   function zoom(factor: number) {
     const scale = chart.current?.timeScale(); const range = scale?.getVisibleLogicalRange();
     if (!scale || !range) return;
@@ -70,6 +86,7 @@ function ChartSession({interval, changeInterval, showSma, toggleSma}: {interval:
     </div>
     <div className="flex flex-wrap gap-x-5 gap-y-1 px-5 pt-3 text-xs text-slate-400 tabular-nums"><span>O {format(last?.open)}</span><span>H {format(last?.high)}</span><span>L {format(last?.low)}</span><span>C {format(last?.close)}</span><span>Vol {format(last?.volume)} BTC</span></div>
     {error && <p role="alert" className="mx-4 mt-3 rounded-lg bg-amber-950/50 p-3 text-sm text-amber-200">{error}</p>}
+    {program&&<div className="flex flex-wrap gap-4 px-5 py-2 text-xs">{program.body.map((node,i)=><span key={`${node.kind}-${node.period}`} style={{color:scriptColors[i]}}>{node.kind} {node.period}{candles.length<node.period?" · waiting for history":""}</span>)}</div>}
     <div className="relative"><div ref={container} className="h-[55vh] min-h-[320px] w-full sm:h-[62vh]"/>{!candles.length && <div className="pointer-events-none absolute inset-0 grid place-items-center text-sm text-slate-400">{error ? "Waiting for market data…" : "Synchronizing candles…"}</div>}</div>
     <div className="flex flex-wrap justify-between gap-2 border-t border-slate-800 px-5 py-3 text-xs text-slate-500"><span>Scroll to zoom · Drag to pan · SMA in purple</span><span>{updatedAt ? `Last tick ${new Date(updatedAt).toISOString().slice(11,19)} UTC` : "Awaiting stream"}</span></div>
   </section>;

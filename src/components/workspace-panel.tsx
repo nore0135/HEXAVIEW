@@ -1,7 +1,8 @@
 "use client";
 import {useState} from "react";
+import {parseHexaScript} from "@/lib/hexascript";
 import {Interval,isInterval} from "@/lib/market";
-export interface ChartState {schemaVersion:1;symbol:"BTCUSDT";interval:Interval;showSma:boolean}
+export interface ChartState {schemaVersion:1;symbol:"BTCUSDT";interval:Interval;showSma:boolean;script?:string}
 interface Saved {id:string;name:string;version:number}
 const api=(process.env.NEXT_PUBLIC_API_URL??"").replace(/\/$/,"");
 export function WorkspacePanel({state,onLoad}:{state:ChartState;onLoad:(state:ChartState)=>void}) {
@@ -33,6 +34,7 @@ export function WorkspacePanel({state,onLoad}:{state:ChartState;onLoad:(state:Ch
  <select aria-label="Load workspace" value={selected?.id??""} onChange={e=>{const id=e.target.value;if(!id){setSelected(null);return;}void run(async()=>{
  const item=await request(`/workspaces/${id}`) as Saved & {state:ChartState};
  if(item.state.schemaVersion!==1||item.state.symbol!=="BTCUSDT"||!isInterval(item.state.interval)||typeof item.state.showSma!=="boolean")throw new Error("Unsupported saved layout");
+ if(item.state.script){parseHexaScript(item.state.script);}
  setSelected(item);setName(item.name);onLoad(item.state);setMessage("Workspace loaded.");});}}><option value="">Load workspace…</option>{saved.map(item=><option key={item.id} value={item.id}>{item.name}</option>)}</select>
  <button onClick={()=>void run(async()=>{await request("/auth/logout","POST");setToken("");setSelected(null);setSaved([]);setMessage("Signed out.");})}>Sign out</button>
  </>}

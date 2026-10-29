@@ -8,7 +8,7 @@ test('password verification and opaque session hashing',async()=>{
  const hash=await hashPassword('a-very-long-password');assert.equal(await verifyPassword('a-very-long-password',hash),true);assert.equal(await verifyPassword('wrong-password',hash),false);assert.equal(newToken().length,43);assert.equal(tokenHash('a').length,64);
 });
 test('layout schema rejects unsupported symbols and unknown state fields',()=>{
- const state={schemaVersion:1,symbol:'BTCUSDT',interval:'1m',showSma:false};assert.equal(chartState.safeParse(state).success,true);assert.equal(chartState.safeParse({...state,symbol:'UNKNOWN'}).success,false);assert.equal(chartState.safeParse({...state,script:'execute'}).success,false);
+ const state={schemaVersion:1,symbol:'BTCUSDT',interval:'1m',showSma:false};assert.equal(chartState.safeParse(state).success,true);assert.equal(chartState.safeParse({...state,symbol:'UNKNOWN'}).success,false);assert.equal(chartState.safeParse({...state,unknownField:'execute'}).success,false);
 });
 test('unauthenticated requests never query private workspace data',async()=>{
  let queries=0;const pool={query:async()=>{queries++;return {rows:[]};}} as unknown as Pool;

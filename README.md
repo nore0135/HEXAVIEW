@@ -1,6 +1,6 @@
-# HexaView — Phase 2, GitHub Pages edition
+# HexaView — Phase 3, GitHub Pages edition
 
-This package contains the complete Phase 1 frontend plus Phase 2 database design, Node.js API and workspace integration. Phase 3 is not started.
+This package contains the complete Phase 1 frontend plus Phase 2 database design, Node.js API and workspace integration. Phase 3 adds the browser HexaScript editor, indicator AST/evaluator, tested server crossing core and alert schema/design. See [Phase 3 architecture](docs/PHASE_3.md). Always-on alert delivery is not deployed.
 
 ## Hosting layout
 
@@ -96,9 +96,9 @@ Login body uses only `email` and `password`. Authentication returns `user`, `tok
 
 Workspace creation body:
 ```json
-{"name":"BTC intraday","state":{"schemaVersion":1,"symbol":"BTCUSDT","interval":"5m","showSma":true}}
+{"name":"BTC intraday","state":{"schemaVersion":1,"symbol":"BTCUSDT","interval":"5m","showSma":true,"script":"calculate SMA 50"}}
 ```
-For PUT, include the current integer `version` from the last read/save. A conflicting version returns 409; missing or unowned IDs return 404. The current saved layout records symbol, interval and SMA setting; viewport/drawings are not yet persisted.
+For PUT, include the current integer `version` from the last read/save. A conflicting version returns 409; missing or unowned IDs return 404. The current saved layout records symbol, interval, SMA setting and optional HexaScript source; viewport/drawings are not yet persisted.
 
 ## Data model
 
@@ -119,7 +119,7 @@ Rate limits are per-process/IP and trustProxy is false. When deploying behind a 
 
 ## Verification
 
-Passed: five frontend data tests; static Next.js export with `/hexaview` base path; backend strict TypeScript build; five backend tests covering password hashes, layout validation, authentication, ownership scoping and version conflicts.
+Passed: ten frontend data/parser/indicator tests; static Next.js export with `/hexaview` base path; backend strict TypeScript build; ten backend tests covering crossing behavior, resource bounds, password hashes, layout validation, authentication, ownership scoping and version conflicts.
 
 Backend HTTP tests use Fastify injection and mocked database responses. PostgreSQL/TimescaleDB binaries and Docker are unavailable in the generation environment: migrations and database-backed end-to-end behavior have **not** been executed here. Browser UI and sustained WebSocket reconnection behavior also remain manual checks. This package is not claimed to be load-tested enterprise production software.
 
