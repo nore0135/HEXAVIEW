@@ -4,15 +4,33 @@ services:
     environment:
       POSTGRES_DB: hexaview
       POSTGRES_USER: hexaview
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in your local .env}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-hexaview_local_dev_password}
     ports:
       - "127.0.0.1:5432:5432"
     volumes:
       - hexaview-db:/var/lib/postgresql/data
     healthcheck:
-      test: [CMD-SHELL, "pg_isready -U hexaview -d hexaview"]
+      test: ["CMD-SHELL", "pg_isready -U hexaview -d hexaview"]
       interval: 5s
       timeout: 5s
       retries: 10
+
+  api:
+    build:
+      context: .
+      dockerfile: server/Dockerfile
+    depends_on:
+      database:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://hexaview:${POSTGRES_PASSWORD:-hexaview_local_dev_password}@database:5432/hexaview
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-http://localhost:3000,https://nore0135.github.io}
+      AUTO_MIGRATE: "true"
+      HOST: "0.0.0.0"
+      PORT: "4000"
+    ports:
+      - "127.0.0.1:4000:4000"
+    restart: unless-stopped
+
 volumes:
   hexaview-db:

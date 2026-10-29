@@ -1,7 +1,48 @@
-import {z} from "zod";
-export const credentials=z.object({email:z.string().trim().toLowerCase().email().max(254),password:z.string().min(12).max(128)}).strict();
-export const registration=credentials.extend({handle:z.string().regex(/^[a-z0-9_]{3,30}$/),displayName:z.string().trim().min(1).max(80)});
-export const chartState=z.object({schemaVersion:z.literal(1),symbol:z.literal("BTCUSDT"),interval:z.enum(["1m","5m","15m","1h","4h","1d"]),showSma:z.boolean(),script:z.string().max(2048).optional()}).strict();
-export const workspace=z.object({name:z.string().trim().min(1).max(80),state:chartState}).strict();
-export const updateWorkspace=workspace.extend({version:z.number().int().positive()});
-export const uuid=z.string().uuid();
+import { z } from "zod";
+
+export const credentials = z
+  .object({
+    email: z.string().trim().toLowerCase().email().max(254),
+    password: z.string().min(12).max(128),
+  })
+  .strict();
+
+export const registration = credentials.extend({
+  handle: z.string().regex(/^[a-z0-9_]{3,30}$/),
+  displayName: z.string().trim().min(1).max(80),
+});
+
+export const chartState = z
+  .object({
+    schemaVersion: z.literal(1),
+    symbol: z.literal("BTCUSDT"),
+    interval: z.enum(["1m", "5m", "15m", "1h", "4h", "1d"]),
+    showSma: z.boolean(),
+    script: z.string().max(2048).optional(),
+  })
+  .strict();
+
+export const workspace = z
+  .object({
+    name: z.string().trim().min(1).max(80),
+    state: chartState,
+  })
+  .strict();
+
+export const updateWorkspace = workspace.extend({
+  version: z.number().int().positive(),
+});
+
+export const alertDirection = z.enum(["crosses_above", "crosses_below"]);
+
+export const createAlert = z
+  .object({
+    venue: z.literal("BINANCE").default("BINANCE"),
+    symbol: z.literal("BTCUSDT").default("BTCUSDT"),
+    direction: alertDirection,
+    threshold: z.number().finite().positive().max(10_000_000),
+  })
+  .strict();
+
+export const uuid = z.string().uuid();
+export const outboxId = z.coerce.number().int().positive();

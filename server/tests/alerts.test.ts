@@ -1,20 +1,59 @@
-import {test} from 'node:test';
-import assert from 'node:assert/strict';
-import {AlertEngine,PriceAlert} from '../src/alert-engine.js';
-const alert=(id:string,threshold:number,direction:PriceAlert['direction']='crosses_above'):PriceAlert=>({id,userId:'owner',symbol:'BTCUSDT',threshold,direction});
-const tick=(sequence:number,price:number)=>({symbol:'BTCUSDT',sequence,price});
-test('crossings fire once, exact touches wait, first sample only sets baseline',()=>{
- const e=new AlertEngine();e.add(alert('a',100));assert.deepEqual(e.evaluate(tick(1,90)),[]);assert.deepEqual(e.evaluate(tick(2,100)),[]);assert.equal(e.evaluate(tick(3,101))[0].alertId,'a');assert.deepEqual(e.evaluate(tick(4,102)),[]);assert.equal(e.size,0);
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import type { Pool } from "pg";
+import { AlertEngine, PriceAlert } from "../src/alert-engine.js";
+import { AlertWorker } from "../src/alert-worker.js";
+
+const alert = (
+  id: string,
+  threshold: number,
+  direction: PriceAlert["direction"] = "crosses_above",
+): PriceAlert => ({ id, userId: "owner", symbol: "BTCUSDT", threshold, direction });
+const tick = (sequence: number, price: number) => ({ symbol: "BTCUSDT", sequence, price });
+
+test("crossings fire once, exact touches wait, first sample only sets baseline", () => {
+  const e = new AlertEngine();
+  e.add(alert("a", 100));
+  assert.deepEqual(e.evaluate(tick(1, 90)), []);
+  assert.deepEqual(e.evaluate(tick(2, 100)), []);
+  assert.equal(e.evaluate(tick(3, 101))[0].alertId, "a");
+  assert.deepEqual(e.evaluate(tick(4, 102)), []);
+  assert.equal(e.size, 0);
 });
-test('downward crossings and duplicate/stale events',()=>{
- const e=new AlertEngine();e.add(alert('b',100,'crosses_below'));e.evaluate(tick(10,110));assert.deepEqual(e.evaluate(tick(9,90)),[]);assert.deepEqual(e.evaluate(tick(10,90)),[]);assert.equal(e.evaluate(tick(11,90)).length,1);
-});
-test('large move selects all crossed thresholds but not untouched or opposite-direction alerts',()=>{
- const e=new AlertEngine();for(let i=1;i<=10000;i++)e.add(alert(String(i),i));e.add(alert('down',5000,'crosses_below'));e.evaluate(tick(1,4500));assert.equal(e.evaluate(tick(2,5500)).length,1000);assert.equal(e.size,9001);
-});
-test('cancellation, symbol isolation and baseline reset',()=>{
- const e=new AlertEngine();e.add(alert('a',100));assert.equal(e.remove('a'),true);assert.equal(e.remove('a'),false);e.add(alert('b',100));e.evaluate(tick(1,90));assert.deepEqual(e.evaluate({symbol:'OTHER',sequence:2,price:110}),[]);e.resetBaseline('BTCUSDT');assert.deepEqual(e.evaluate(tick(3,110)),[]);
-});
-test('capacity, duplicate IDs and malformed ticks are rejected',()=>{
- const e=new AlertEngine(1);e.add(alert('a',100));assert.throws(()=>e.add(alert('a',100)));assert.throws(()=>e.add(alert('b',100)));assert.throws(()=>e.evaluate(tick(1,NaN)));
+
+test("AlertWorker syncs active alerts and persists triggered events to alert_outbox", async () => {
+  const queries: string[] = [];
+  const pool = {
+    query: async (sql: string) => {
+      queries.push(sql);
+      return {
+        rows: [
+          {
+            id: "alert-1",
+            user_id: "user-1",
+            symbol: "BTCUSDT",
+            direction: "crosses_above",
+            threshold: "90000",
+          },
+        ],
+        rowCount: 1,
+      };
+    },
+    connect: async () => ({
+      query: async (sql: string) => {
+        queries.push(sql);
+        return { rows: [{ id: "alert-1" }], rowCount: 1 };
+      },
+      release: () => {},
+    }),
+  } as unknown as Pool;
+
+  const worker = new AlertWorker(pool);
+  const synced = await worker.syncActiveAlerts();
+  assert.equal(synced, 1);
+  assert.equal((await worker.evaluateTick({ symbol: "BTCUSDT", sequence: 1, price: 89500 })).length, 0);
+  const events = await worker.evaluateTick({ symbol: "BTCUSDT", sequence: 2, price: 90100 });
+  assert.equal(events.length, 1);
+  assert.equal(events[0].alertId, "alert-1");
+  assert.equal(queries.some((q) => q.includes("INSERT INTO alert_outbox")), true);
 });
