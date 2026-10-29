@@ -1,0 +1,10 @@
+import {Pool} from "pg";
+import {createApp} from "./app.js";
+if(!process.env.DATABASE_URL)throw new Error("DATABASE_URL is required");
+if(!process.env.ALLOWED_ORIGINS)throw new Error("ALLOWED_ORIGINS is required");
+const origins=process.env.ALLOWED_ORIGINS.split(",").map(value=>new URL(value.trim()).origin);
+const pool=new Pool({connectionString:process.env.DATABASE_URL,max:10,connectionTimeoutMillis:5000,idleTimeoutMillis:30000,statement_timeout:10000});
+const app=await createApp(pool,origins);
+app.addHook("onClose",async()=>{await pool.end();});
+for(const signal of ["SIGTERM","SIGINT"] as const)process.once(signal,()=>{void app.close();});
+await app.listen({port:Number(process.env.PORT??4000),host:process.env.HOST??"127.0.0.1"});

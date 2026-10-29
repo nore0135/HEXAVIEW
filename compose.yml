@@ -1,0 +1,18 @@
+services:
+  database:
+    image: timescale/timescaledb:latest-pg17
+    environment:
+      POSTGRES_DB: hexaview
+      POSTGRES_USER: hexaview
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in your local .env}
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - hexaview-db:/var/lib/postgresql/data
+    healthcheck:
+      test: [CMD-SHELL, "pg_isready -U hexaview -d hexaview"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+volumes:
+  hexaview-db:
