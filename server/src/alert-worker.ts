@@ -24,6 +24,8 @@ export class AlertWorker implements AlertController {
   private syncTimer?: ReturnType<typeof setInterval>;
   private pollTimer?: ReturnType<typeof setInterval>;
   private sequence = 1;
+  private readonly pending = new Map<string, AlertEvent>();
+  private flushing: Promise<AlertEvent[]> | null = null;
 
   constructor(
     private readonly pool: Pool,
@@ -35,7 +37,7 @@ export class AlertWorker implements AlertController {
   }
 
   registerAlert(alert: PriceAlert): void {
-    if (!this.engine.has(alert.id)) {
+    if (!this.engine.has(alert.id) && !this.pending.has(alert.id)) {
       this.engine.add(alert);
     }
   }
@@ -50,7 +52,7 @@ export class AlertWorker implements AlertController {
     );
     let added = 0;
     for (const row of result.rows) {
-      if (!this.engine.has(row.id)) {
+      if (!this.engine.has(row.id) && !this.pending.has(row.id)) {
         const threshold = Number(row.threshold);
         if (Number.isFinite(threshold) && threshold > 0) {
           this.engine.add({
@@ -68,45 +70,49 @@ export class AlertWorker implements AlertController {
   }
 
   async evaluateTick(tick: PriceTick): Promise<AlertEvent[]> {
-    const triggered = this.engine.evaluate(tick);
-    if (!triggered.length) return [];
+    for (const event of this.engine.evaluate(tick)) this.pending.set(event.alertId, event);
+    return this.flushPending();
+  }
 
-    for (const event of triggered) {
+  /** Retain candidates until commit succeeds; a database outage must not erase a crossing. */
+  async flushPending(): Promise<AlertEvent[]> {
+    if (this.flushing) return this.flushing;
+    this.flushing = this.persistPending();
+    try { return await this.flushing; } finally { this.flushing = null; }
+  }
+
+  private async persistPending(): Promise<AlertEvent[]> {
+    const committed: AlertEvent[] = [];
+    // Snapshot bounds each flush so continuous ticks cannot monopolize the connection pool.
+    for (const event of [...this.pending.values()]) {
       const client = await this.pool.connect();
       try {
         await client.query("BEGIN");
         const updated = await client.query(
-          "UPDATE price_alerts SET status = 'triggered', triggered_at = now(), version = version + 1 WHERE id = $1 AND status = 'active' RETURNING id",
-          [event.alertId],
+          "UPDATE price_alerts SET status = 'triggered', triggered_at = now(), version = version + 1 WHERE id = $1 AND user_id = $2 AND status = 'active' RETURNING id",
+          [event.alertId, event.userId],
         );
         if (updated.rowCount) {
           await client.query(
             `INSERT INTO alert_outbox (alert_id, user_id, source_sequence, payload)
              VALUES ($1, $2, $3, $4::jsonb)
              ON CONFLICT (alert_id) DO NOTHING`,
-            [
-              event.alertId,
-              event.userId,
-              event.sequence,
-              JSON.stringify({
-                alertId: event.alertId,
-                symbol: event.symbol,
-                direction: event.direction,
-                threshold: event.threshold,
-                price: event.price,
-                triggeredAt: new Date().toISOString(),
-              }),
-            ],
+            [event.alertId, event.userId, event.sequence, JSON.stringify({
+              alertId:event.alertId,symbol:event.symbol,direction:event.direction,
+              threshold:event.threshold,price:event.price,triggeredAt:new Date().toISOString(),
+            })],
           );
         }
         await client.query("COMMIT");
-      } catch {
-        await client.query("ROLLBACK");
-      } finally {
-        client.release();
-      }
+        this.pending.delete(event.alertId);
+        // A cancellation or another worker can win the database race.
+        if (updated.rowCount) committed.push(event);
+      } catch (error) {
+        await client.query("ROLLBACK").catch(() => {});
+        throw error;
+      } finally { client.release(); }
     }
-    return triggered;
+    return committed;
   }
 
   async start(syncIntervalMs = 30000, restPollIntervalMs = 10000): Promise<void> {
@@ -115,7 +121,7 @@ export class AlertWorker implements AlertController {
     await this.syncActiveAlerts();
 
     this.syncTimer = setInterval(() => {
-      void this.syncActiveAlerts().catch(() => {});
+      void this.flushPending().then(() => this.syncActiveAlerts()).catch(error => console.error("Alert synchronization failed", error));
     }, syncIntervalMs);
 
     this.pollTimer = setInterval(() => {
@@ -149,7 +155,7 @@ export class AlertWorker implements AlertController {
           const price = Number(payload.p);
           if (payload.s === "BTCUSDT" && Number.isFinite(price) && price > 0) {
             const seq = this.sequence++;
-            void this.evaluateTick({ symbol: "BTCUSDT", sequence: seq, price });
+            void this.evaluateTick({ symbol: "BTCUSDT", sequence: seq, price }).catch(error => console.error("Alert persistence failed; retry pending", error));
           }
         } catch {}
       };

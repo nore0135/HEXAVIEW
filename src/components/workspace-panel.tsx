@@ -1,5 +1,6 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
+import {hashLocalPassword,verifyLocalPassword} from "@/lib/local-password";
 import { parseHexaScript } from "@/lib/hexascript";
 import { Interval, isInterval } from "@/lib/market";
 
@@ -317,7 +318,7 @@ export function WorkspacePanel({
           <span className="text-slate-400">
             {isBackendMode
               ? "Always-on 24/7 PostgreSQL alerts, accounts & workspaces active."
-              : "Accounts, layouts & live tab alerts saved locally. Connect a backend host for 24/7 server alerts."}
+              : "Local profiles and layouts stay on this device. Alerts run only while this tab is active; browser profiles are not secure cloud accounts."}
           </span>
         </div>
         <button
@@ -420,19 +421,26 @@ export function WorkspacePanel({
                   setMessage(`Signed in as ${normalizedEmail} (Cloud Backend).`);
                 } else {
                   const users = safeRead<Record<string, LocalAccount>>(STORAGE_KEYS.localUsers, {});
-                  const simpleHash = btoa(unescape(encodeURIComponent(`hexaview:${password}`)));
                   if (register) {
                     if (users[normalizedEmail]) throw new Error("Account already exists in browser storage");
                     users[normalizedEmail] = {
                       email: normalizedEmail,
                       handle: handle || normalizedEmail.split("@")[0],
-                      passwordHash: simpleHash,
+                      passwordHash: await hashLocalPassword(password),
                     };
                     safeWrite(STORAGE_KEYS.localUsers, users);
                   } else {
                     const existing = users[normalizedEmail];
-                    if (!existing || existing.passwordHash !== simpleHash) {
+                    const checked = existing ? await verifyLocalPassword(password, existing.passwordHash) : {valid:false,upgrade:false};
+                    if (!checked.valid) {
                       throw new Error("Invalid email or password (or click Register to create an account)");
+                    }
+                  }
+                  if (!register) {
+                    const account = users[normalizedEmail];
+                    if (!account.passwordHash.startsWith("pbkdf2-sha256$")) {
+                      account.passwordHash = await hashLocalPassword(password);
+                      safeWrite(STORAGE_KEYS.localUsers, users);
                     }
                   }
                   const localToken = `local_${btoa(normalizedEmail).replace(/=/g, "")}`;

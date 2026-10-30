@@ -37,3 +37,15 @@ Because GitHub Pages only hosts static files, deploy `server/` to a free or star
    - Name: `NEXT_PUBLIC_API_URL` (or `API_URL`)
    - Value: `https://hexaview-api.onrender.com`
 3. Re-run the **Deploy HexaView to GitHub Pages** workflow (or paste the URL directly into the live site using the **Configure Backend Host** button in the top bar).
+
+## Continuation review — 30 October 2026
+
+The uploaded chart, browser-mode workspace/alert interface, backend switcher and hosting files are retained.
+
+- Browser-profile password verifiers now use salted PBKDF2-SHA256 (600,000 iterations). Existing reversible verifiers are upgraded after a successful login. Profiles already signed in need to sign out and back in to upgrade. Local storage is still editable by anyone with browser access; these profiles are a device-local convenience, not secure cloud authentication.
+- Alert candidates remain in an in-memory retry queue until the database transaction commits. Failed writes are logged and retried on subsequent ticks or periodic synchronization. Database-cancelled alerts do not emit successful notifications. This prevents loss during a transient database failure while the process stays alive; it does not provide crash-safe market replay.
+- GitHub Actions accepts either `API_URL` (preferred) or `NEXT_PUBLIC_API_URL`.
+
+Validation: 12 frontend unit tests, 8 backend tests, static Next.js export and backend TypeScript compilation passed. Worker tests use mocked database responses. No real-database, sustained-feed, deployment-provider or browser interaction tests were performed.
+
+Remaining backend checks before relying on alerts: ordered exchange event IDs and gap recovery, avoiding REST/WebSocket sample ordering conflicts, durable recovery after worker restart, bounded notification backpressure, and verification that the selected host keeps the worker running. No cloud backend deployment is confirmed by this review.

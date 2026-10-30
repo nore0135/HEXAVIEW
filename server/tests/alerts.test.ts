@@ -57,3 +57,27 @@ test("AlertWorker syncs active alerts and persists triggered events to alert_out
   assert.equal(events[0].alertId, "alert-1");
   assert.equal(queries.some((q) => q.includes("INSERT INTO alert_outbox")), true);
 });
+
+test("worker retains a failed crossing for retry without requiring another crossing", async () => {
+  let fail = true;
+  let inserts = 0;
+  const pool = {connect:async()=>({
+    query:async(sql:string)=>{
+      if(sql.includes('INSERT INTO alert_outbox')) {if(fail)throw new Error('Database unavailable');inserts++;}
+      return {rows:[{id:'a'}],rowCount:1};
+    },release:()=>{},
+  })} as unknown as Pool;
+  const worker=new AlertWorker(pool);worker.registerAlert(alert('a',100));
+  await worker.evaluateTick(tick(1,90));
+  await assert.rejects(worker.evaluateTick(tick(2,110)),/Database unavailable/);
+  fail=false;
+  const recovered=await worker.flushPending();
+  assert.equal(recovered.length,1);assert.equal(recovered[0].price,110);assert.equal(inserts,1);
+  assert.deepEqual(await worker.flushPending(),[]);
+});
+test("cancelled database rule does not emit a notification",async()=>{
+ let inserts=0;
+ const pool={connect:async()=>({query:async(sql:string)=>{if(sql.includes('INSERT INTO'))inserts++;return {rows:[],rowCount:0};},release:()=>{}})} as unknown as Pool;
+ const worker=new AlertWorker(pool);worker.registerAlert(alert('a',100));await worker.evaluateTick(tick(1,90));
+ assert.deepEqual(await worker.evaluateTick(tick(2,110)),[]);assert.equal(inserts,0);
+});
